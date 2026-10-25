@@ -7,7 +7,7 @@ function limited(ip: string): boolean {
   const arr = (hits.get(ip) || []).filter((t) => now - t < 10 * 60 * 1000);
   arr.push(now);
   hits.set(ip, arr);
-  return arr.length > 20;
+  return arr.length > 15;
 }
 
 const SYSTEM =
@@ -22,7 +22,7 @@ const SYSTEM =
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
-  const key = process.env.ANTHROPIC_API_KEY;
+  const key = process.env.GEMINI_API_KEY;
   if (!key) return res.status(500).json({ error: "Coach is not configured yet" });
 
   const ip = String(req.headers["x-forwarded-for"] || "anon").split(",")[0].trim();
@@ -39,27 +39,35 @@ export default async function handler(req: any, res: any) {
       (question ? `My question: ${question}\n` : "") +
       `<data>${data}</data>`;
 
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({
-        model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5",
-        max_tokens: 500,
-        system: SYSTEM,
-        messages: [{ role: "user", content }],
-      }),
-    });
+    const models = [process.env.GEMINI_MODEL, "gemini-flash-latest", "gemini-3.8-flash"].filter(Boolean) as string[];
 
-    if (!r.ok) {
-      console.error("coach failed", r.status);
-      return res.status(502).json({ error: "The coach could not answer. Please try again." });
+    for (const model of models) {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "x-goog-api-key": key, "content-type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: SYSTEM }] },
+          contents: [{ role: "user", parts: [{ text: content }] }],
+          generationConfig: { maxOutputTokens: 900, temperature: 0.5 },
+        }),
+      });
+
+      if (r.status === 429) return res.status(429).json({ error: "The free AI limit is reached for now. Try again in a few minutes." });
+      if (r.status === 404 || r.status === 400) continue; // model name not available, try the next one
+      if (!r.ok) {
+        console.error("coach failed", r.status);
+        return res.status(502).json({ error: "The coach could not answer. Please try again." });
+      }
+
+      const j: any = await r.json();
+      const parts: any[] = j?.candidates?.[0]?.content?.parts || [];
+      const reply = parts.map((p) => String(p?.text || "")).join("").trim();
+      if (reply) return res.status(200).json({ reply });
     }
-    const j: any = await r.json();
-    const reply = String(j?.content?.[0]?.text || "").trim();
-    if (!reply) return res.status(502).json({ error: "The coach could not answer. Please try again." });
-    return res.status(200).json({ reply });
+
+    return res.status(502).json({ error: "The coach could not answer. Check GEMINI_MODEL in Vercel." });
   } catch (e: any) {
     console.error("coach error:", e?.message);
     return res.status(502).json({ error: "The coach could not answer. Please try again." });
   }
-}v
+}
