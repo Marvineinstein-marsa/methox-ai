@@ -1,0 +1,6 @@
+{
+  "name": "Methox Ai",
+  "description": "Production-grade AI trading assistant and risk manager with live candlestick charts, real-time market signals, paper & live trading, backtesting, portfolio tracker, trading journal, and emergency kill switch.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
